@@ -12,7 +12,7 @@ The web link works once GitHub Pages is on: the repo must be **Public**, then **
 
 **On iPhone:** open the link in **Safari** → Share → **Add to Home Screen**. It then opens full-screen like an app. Opening the file inside another app's preview (Claude, Files) blocks the live exchange feeds.
 
-**Download instead:** grab the latest HTML from **[Releases](../../releases/latest)** and open it in Chrome.
+**Download instead:** click **[Aegis Order Flow.html](Aegis%20Order%20Flow.html)** → **Download raw file** (↓ icon, top right of the file view) and open it in Chrome. Tagged versions are also under **[Releases](../../releases)**.
 
 ## Files
 
