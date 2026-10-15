@@ -4,9 +4,9 @@ Free footprint, liquidity heatmap and order-flow terminal for gold. Runs in your
 
 ## ▶ Open it
 
-**Web link (live data, nothing to download):**
-**https://hisakoa2.github.io/Orderflow/**
-iPhone version: **https://hisakoa2.github.io/Orderflow/Aegis%20Order%20Flow%20iPhone.html**
+**Web links (live data, nothing to download):**
+- 💻 **PC / Mac:** https://hisakoa2.github.io/Orderflow/pc.html
+- 📱 **iPhone:** https://hisakoa2.github.io/Orderflow/phone.html
 
 The web link works once GitHub Pages is on: the repo must be **Public**, then **Settings → Pages → Deploy from a branch → main → / (root) → Save**.
 

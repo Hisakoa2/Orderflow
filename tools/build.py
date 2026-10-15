@@ -13,4 +13,6 @@ rep("<title>Aegis Order Flow</title>", "<title>Aegis Order Flow iPhone</title>")
 s = s.replace('"afe.settings"', '"afe.iphone.settings"').replace('"afe.userLevels"', '"afe.iphone.userLevels"')
 s = s.replace("innerWidth <= 1100", "true")                  # book chip always on
 open("Aegis Order Flow iPhone.html", "w", encoding="utf-8").write(s)
-print("built index.html + Aegis Order Flow iPhone.html")
+open("phone.html", "w", encoding="utf-8").write(s)   # short link: /phone.html
+shutil.copyfile(src, "pc.html")                         # short link: /pc.html
+print("built index.html, pc.html, phone.html, Aegis Order Flow iPhone.html")
