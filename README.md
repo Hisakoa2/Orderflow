@@ -1,34 +1,45 @@
 # Aegis Order Flow
 
-Free footprint, liquidity heatmap and order-flow terminal for gold. It runs entirely in the browser: no install, no account, no API keys.
+Free footprint, liquidity heatmap and order-flow terminal for gold. Runs in your browser: no install, no account, no API keys.
+
+## ▶ Open it
+
+**Web link (live data, nothing to download):**
+**https://hisakoa2.github.io/Orderflow/**
+iPhone version: **https://hisakoa2.github.io/Orderflow/Aegis%20Order%20Flow%20iPhone.html**
+
+The web link works once GitHub Pages is on: the repo must be **Public**, then **Settings → Pages → Deploy from a branch → main → / (root) → Save**.
+
+**On iPhone:** open the link in **Safari** → Share → **Add to Home Screen**. It then opens full-screen like an app. Opening the file inside another app's preview (Claude, Files) blocks the live exchange feeds.
+
+**Download instead:** grab the latest HTML from **[Releases](../../releases/latest)** and open it in Chrome.
 
 ## Files
 
 | File | What it is |
 |---|---|
-| `Aegis Order Flow.html` | Main version (PC / Mac, also adapts to phones) |
-| `Aegis Order Flow iPhone.html` | Phone-first layout (Panel button, big zoom buttons, pinch to zoom) |
-| `index.html` | Copy of the main version, so the repo's web link opens straight into the app |
-
-## Open it
-
-- **PC / Mac:** download `Aegis Order Flow.html` and open it in Chrome.
-- **iPhone:** open the app from its web link in Safari (Share → Add to Home Screen to use it like an app). Opening the file inside another app's preview blocks the live exchange feeds.
+| `Aegis Order Flow.html` | Main version (PC / Mac, also adapts to phones). This is the one that gets edited. |
+| `Aegis Order Flow iPhone.html` | Phone-first layout, built from the main file |
+| `index.html` | Copy of the main version, so the web link opens straight into the app |
+| `manifest.json`, `icon-*.png` | App name and icon for Add to Home Screen |
+| `tools/build.py` | Rebuilds `index.html` and the iPhone version from the main file |
 
 ## Data
 
-Live trades with real buy/sell aggressor side and full order books from public exchange websockets:
+Live trades with the real buy/sell aggressor side and full order books from public exchange websockets:
 
 - Binance `XAUUSDT` gold perpetual (primary)
 - Hyperliquid `xyz:GOLD`
 - Bybit `XAUTUSDT`, OKX `XAUT-USDT-SWAP`, Kraken `PAXG/USD` (optional)
 
-Other venues are basis-aligned onto the primary venue's price. Use ⚙ → price offset to line the axis up with your TradingView / OANDA chart. This is crypto-venue gold order flow, not CME futures, so treat it as a proxy.
+This is gold order flow from crypto exchanges, not CME futures, so treat it as a strong proxy. Prices can sit a few dollars from OANDA / TradingView: tap **⇄ Align**, type your TradingView price, and everything lines up.
 
 ## Features
 
 - Footprint candles (bid × ask, delta, diagonal imbalances, POC), heatmap of resting liquidity, trade bubbles
 - Order ladder, session volume profile, CVD, reversal signals, stacked-imbalance zones
-- Your own levels: paste Aegis long/short levels and they are drawn on the chart with live flow at each level
+- **Book control**: who has more resting orders within ±$3 of price, plus the biggest bid and ask walls
+- **Your levels**: paste Aegis long/short levels; they're drawn on the chart with live flow at each one
 - TradingView-style zoom: drag the price scale / time scale to stretch, AUTO price fit, trackpad and keyboard support
+- **Aa** changes the footprint number size
 - Trades are stored in your browser so history builds up across refreshes

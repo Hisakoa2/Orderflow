@@ -6,6 +6,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#07080a">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
 <title>Aegis Order Flow</title>
 <style>
 :root{
@@ -157,6 +160,8 @@ select{background:var(--panel2);border:1px solid var(--line);border-radius:6px;p
     <span class="pill" id="pillFeed"><span class="dot"></span><span>connecting</span></span>
     <span class="px" id="lastPx">—</span>
     <button class="icon" id="btnFollow" title="Follow price (double-click chart)">⤓ Follow</button>
+    <button class="icon" id="btnAlign" title="Line the price up with your TradingView chart">⇄ Align</button>
+    <button class="icon" id="btnText" title="Number size on the footprint">Aa</button>
     <button class="icon" id="btnSettings" title="Settings">⚙</button>
     <button class="icon" id="btnHelp" title="Help">?</button>
 
@@ -195,6 +200,13 @@ select{background:var(--panel2);border:1px solid var(--line);border-radius:6px;p
       </div>
       <div class="sec" style="border-bottom:0;padding-bottom:4px"><h3>Signals <span><button class="icon" id="btnSound" style="padding:1px 7px;font-size:10.5px">🔈 off</button></span></h3></div>
       <div id="sigList"></div>
+      <div class="sec" id="secBook" style="border-top:1px solid var(--line)" title="Resting limit orders within ±$ of price on the live order book. Orders can be pulled (spoofing), so confirm with real trades on the footprint.">
+        <h3>Book control <span id="bkBand"></span></h3>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><span id="bkName" style="font:800 14px var(--sans);letter-spacing:.02em">—</span><span id="bkTrend" style="font:10.5px var(--mono);color:var(--faint);white-space:nowrap"></span></div>
+        <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;background:#1a1d22;margin:6px 0 3px"><div id="bkBid" style="background:var(--buy);width:50%;transition:width .4s"></div><div style="background:var(--sell);flex:1"></div></div>
+        <div style="display:flex;justify-content:space-between;font:10.5px var(--mono);color:var(--faint)"><span id="bkBidT">bids —</span><span id="bkAskT">asks —</span></div>
+        <div id="bkWalls" style="font:10.5px var(--mono);color:var(--dim);margin-top:5px;line-height:1.5"></div>
+      </div>
     </div>
   </div>
 
@@ -283,6 +295,7 @@ const DEFAULTS = {
   displayOffset: 0,
   snapMs: 500, heatBin: 0.05, keepHours: 6, backfillHours: 2,
   heatContrast: 1.0, heatLog: true, bubbleMin: 0, bubbleScale: 1,
+  textScale: 1.15, bookBand: 3,
   imbRatio: 3, imbMin: 0, stackN: 3,
   absorbX: 3, exhaustPct: 4, divLook: 5,
   sound: false,
@@ -291,6 +304,9 @@ let S;
 try { S = Object.assign(structuredClone(DEFAULTS), JSON.parse(localStorage.getItem("afe.settings") || "{}")); }
 catch (e) { S = structuredClone(DEFAULTS); }
 for (const k of ["ov", "venues", "sym", "lv"]) S[k] = Object.assign({}, DEFAULTS[k], S[k] || {});
+try { if (!localStorage.getItem("afe.settings") && Math.min(screen.width, innerWidth) < 760) { S.mode = "footprint"; S.ov.profile = false; S.ov.bubbles = false; S.ov.cvd = false; } } catch (e) {}
+const isNarrow = () => (R && R.W ? R.W : innerWidth) < 560;
+const candlePx = () => isNarrow() ? clamp(R.W / 3.6, 78, 130) : clamp(R.W / 7, 45, 120);
 function saveSettings() { try { localStorage.setItem("afe.settings", JSON.stringify(S)); } catch (e) {} }
 
 // ─────────────────────────────── trade store (columnar, time-ordered)
@@ -731,6 +747,23 @@ const Hub = {
     this.lastPx = pp; this.lastSide = side; this._tc++;
     R.dirty = true;
   },
+  book: { ema: NaN, bid: 0, ask: 0, hist: [], wallBid: null, wallAsk: null },
+  bookControl(base, bins, bb, ba, bin) {
+    const mid = isFinite(bb) && isFinite(ba) ? (bb + ba) / 2 : this.lastPx; if (!isFinite(mid)) return;
+    const band = S.bookBand, wb = 15, wRow = 0.25;
+    let bid = 0, ask = 0; const wB = new Map(), wA = new Map();
+    for (let i = 0; i < bins.length; i++) {
+      const v = bins[i]; if (!v) continue;
+      const p = (base + i) * bin, d = p - mid;
+      if (d < 0 && d >= -band) bid += v; else if (d > 0 && d <= band) ask += v;
+      if (Math.abs(d) <= wb) { const r = Math.floor(p / wRow); const m = d < 0 ? wB : wA; m.set(r, (m.get(r) || 0) + v); }
+    }
+    const big = m => { let br = null, bv = 0; for (const [r, v] of m) if (v > bv) { bv = v; br = r; } return br === null ? null : { p: br * wRow, s: bv }; };
+    const b = this.book, pct = bid + ask > 0 ? bid / (bid + ask) : 0.5;
+    b.ema = isFinite(b.ema) ? b.ema + (pct - b.ema) * 0.15 : pct;
+    b.bid = bid; b.ask = ask; b.wallBid = big(wB); b.wallAsk = big(wA); b.mid = mid;
+    b.hist.push([Date.now(), b.ema]); while (b.hist.length && b.hist[0][0] < Date.now() - 60e3) b.hist.shift();
+  },
   snapshot() {
     const now = Date.now();
     if (this.primary && (this.primary.status !== "ok" || now - this.primary.lastMsg > 15000)) { const np = this.pickPrimary(); if (np && np !== this.primary) { this.primary = np; this.offsets = {}; UI.msg("Primary feed switched to " + np.name, 5000); } }
@@ -758,6 +791,7 @@ const Hub = {
       for (const [p, s] of f.book.asks) { const i = Math.floor((p + off) / bin + 1e-7) - base; if (i >= 0 && i < n) bins[i] += s; if (p + off < ba) ba = p + off; }
     }
     this.heat.push({ t: now, base, bins, bb, ba });
+    this.bookControl(base, bins, bb, ba, bin);
     const cut = now - S.keepHours * 3600e3;
     let k = 0; while (k < this.heat.length && this.heat[k].t < cut) k++;
     if (k) this.heat.splice(0, k);
@@ -837,6 +871,10 @@ const Candles = {
     return out;
   },
   stats(c) {
+    if (c.done && c._st && c._stRow === this.row) return c._st;
+    const st = this.statsRaw(c); if (c.done) { c._st = st; c._stRow = this.row; } return st;
+  },
+  statsRaw(c) {
     let poc = null, pv = -1, rowsArr = [];
     for (const [r, [b, a]] of c.rows) { const v = a + b; rowsArr.push(v); if (v > pv) { pv = v; poc = r; } }
     return { poc, pocVol: pv, med: pctile(rowsArr, 0.5) };
@@ -1183,7 +1221,7 @@ const R = {
     this.dirty = true;
   },
   geom() {
-    const axisW = 70, timeH = 22, cvdH = S.ov.cvd ? Math.min(120, Math.max(60, this.H * 0.16)) : 0;
+    const nar = this.W < 560, axisW = nar ? 58 : 70, timeH = 22, cvdH = S.ov.cvd ? (nar ? 46 : Math.min(120, Math.max(60, this.H * 0.16))) : 0;
     return { x0: 0, x1: this.W - axisW, y0: 0, y1: this.H - timeH - cvdH, cvdY0: this.H - timeH - cvdH, cvdY1: this.H - timeH, axisW, timeH };
   },
   t2x(t, g) { return g.x1 - (this.view.right - t) / this.view.msPerPx; },
@@ -1203,7 +1241,7 @@ const R = {
     const now = Date.now();
     if (v.follow) {
       const lastT = store.n ? Math.max(store.t[store.n - 1], now) : now;
-      v.right = Math.ceil(lastT / S.snapMs) * S.snapMs + Math.max(S.tf * 2, 40 * v.msPerPx);
+      v.right = lastT + Math.max(S.tf * (isNarrow() ? 0.6 : 2), 40 * v.msPerPx);
     }
     const t0 = this.x2t(g.x0, g), t1 = this.x2t(g.x1, g);
     const cs = Candles.range(t0, t1);
@@ -1237,6 +1275,7 @@ const R = {
     if (S.ov.signals) this.marks(ctx, g, t0, t1);
     this.lastLine(ctx, g);
     this.crosshair(ctx, g);
+    if (innerWidth <= 1100) this.bookChip(ctx, g);
     ctx.restore();
     this.priceAxis(ctx, g);
     this.timeAxis(ctx, g, t0, t1);
@@ -1245,6 +1284,14 @@ const R = {
     UI.updateStats(cs);
   },
 
+  bookChip(ctx, g) {
+    const b = Hub.book; if (!isFinite(b.ema)) return;
+    const p = b.ema * 100, col = p >= 60 ? "#22c38e" : p <= 40 ? "#ff5a5f" : "#8a919b";
+    const txt = (p >= 60 ? "Book: bids " : p <= 40 ? "Book: asks " : "Book: even ") + (p >= 50 ? p : 100 - p).toFixed(0) + "%";
+    ctx.font = "700 11px system-ui,sans-serif"; const w = ctx.measureText(txt).width + 16, x = 8, y = 8;
+    ctx.fillStyle = "rgba(10,11,13,.86)"; ctx.fillRect(x, y, w, 22); ctx.fillStyle = col; ctx.fillRect(x, y, 3, 22);
+    ctx.fillStyle = "#e9edf2"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(txt, x + 9, y + 11.5);
+  },
   grid(ctx, g, t0, t1) {
     const step = niceStep(40 / this.view.pxPerUsd);
     const pLo = this.y2p(g.y1, g), pHi = this.y2p(g.y0, g);
@@ -1266,14 +1313,14 @@ const R = {
     const pLo = this.y2p(g.y1, g), pHi = this.y2p(g.y0, g);
     const r0 = Math.floor(pLo / rowP + 1e-7), r1 = Math.ceil(pHi / rowP);
     const nR = clamp(r1 - r0 + 1, 1, 1600);
-    // columns: one per snapshot or per pixel, whichever is coarser
-    const colPx = Math.max(1, S.snapMs / this.view.msPerPx);
-    const nC = Math.max(3, Math.min(Math.ceil((g.x1 - g.x0) / colPx) + 2, 2400));
-    const tc0 = this.x2t(g.x0, g);
-    const tPerC = (t1 - tc0) / (nC - 2);
+    // columns on a fixed time grid (one per snapshot or per pixel, whichever is coarser) → cache survives smooth scrolling
+    let tPerC = Math.max(S.snapMs, this.view.msPerPx);
+    while ((t1 - t0) / tPerC > 2200) tPerC *= 2;
+    const tc0 = Math.floor(t0 / tPerC) * tPerC - tPerC;
+    const nC = Math.max(3, Math.ceil((t1 - tc0) / tPerC) + 2);
     const yTop = this.p2y((r0 + nR) * rowP, g), yBot = this.p2y(r0 * rowP, g);
     const xL = this.t2x(tc0, g), xR = this.t2x(tc0 + nC * tPerC, g);
-    const key = [Math.round(tc0), Math.round(t1), r0, nR, rowP, nC, S.heatContrast, S.heatLog, H.length, H[H.length - 1].t].join("|");
+    const key = [tc0, tPerC, r0, nR, rowP, nC, S.heatContrast, S.heatLog, H.length, H[H.length - 1].t].join("|");
     const oc = this._oc || (this._oc = document.createElement("canvas"));
     ctx.imageSmoothingEnabled = false;
     if (key === this._heatKey) {
@@ -1300,7 +1347,8 @@ const R = {
     }
     for (let i = 0; i < vals.length; i += 7) if (vals[i] > 0) samples.push(vals[i]);
     let ref = pctile(samples, 0.985) || 1;
-    ref /= S.heatContrast;
+    this._heatRef = this._heatRef ? this._heatRef + (ref - this._heatRef) * 0.25 : ref; // smooth brightness (no flicker)
+    ref = this._heatRef / S.heatContrast;
     const img = new ImageData(nC, nR);
     const px = img.data;
     const lref = Math.log1p(ref);
@@ -1328,11 +1376,11 @@ const R = {
   },
 
   bubbles(ctx, g, t0, t1) {
-    const i0 = store.lowerBound(t0), i1 = store.lowerBound(t1 + 1);
+    const span = t1 - t0, i0 = store.lowerBound(t0 - span * 0.25), i1 = store.lowerBound(t1 + 1);
     if (i1 <= i0) return;
     const bucketMs = Math.max(250, this.view.msPerPx * 6);
     const rowP = Math.max(S.heatBin, niceStep(4 / this.view.pxPerUsd));
-    const bk = [i0, bucketMs, rowP].join("|");
+    const bk = [Math.floor(t0 / Math.max(span * 0.2, 1)), bucketMs, rowP].join("|");
     let agg = this._bAgg;
     const fresh = !agg || this._bKey !== bk || Date.now() - this._bT > 250;
     if (fresh) { agg = this._bAgg = new Map(); this._bKey = bk; this._bT = Date.now(); }
@@ -1372,9 +1420,11 @@ const R = {
     const row = Candles.row;
     const rowH = row * this.view.pxPerUsd;
     const cw = S.tf / this.view.msPerPx;
-    const text = S.cell === "bidask" ? cw >= 74 && rowH >= 10 : cw >= 40 && rowH >= 10;
-    const fs = clamp(Math.floor(rowH * 0.78), 8, 12);
-    ctx.font = `${fs}px ui-monospace,Consolas,monospace`;
+    const fs = clamp(Math.floor(rowH * 0.8 * S.textScale), 9, Math.round(14 * S.textScale));
+    const FONT = `600 ${fs}px ui-monospace,"SF Mono",Consolas,monospace`, FONTB = `800 ${fs}px ui-monospace,"SF Mono",Consolas,monospace`;
+    ctx.font = FONT;
+    const digitW = ctx.measureText("00.0").width;
+    const text = S.cell === "bidask" ? cw >= digitW * 2 + 22 && rowH >= fs * 0.95 : cw >= digitW + 14 && rowH >= fs * 0.95;
     ctx.textBaseline = "middle";
     const translucent = S.mode === "both";
     for (const c of cs) {
@@ -1407,13 +1457,13 @@ const R = {
           const sellImb = b > S.imbMin && b >= S.imbRatio * Math.max(above, 1e-9);
           const ym = (yT + yB) / 2;
           if (S.cell === "bidask") {
-            ctx.textAlign = "right"; ctx.fillStyle = sellImb ? "#ff8a8d" : "#c9ced6"; ctx.font = `${sellImb ? "700 " : ""}${fs}px ui-monospace,Consolas,monospace`;
+            ctx.textAlign = "right"; ctx.fillStyle = sellImb ? "#ff9da0" : "#eef1f5"; ctx.font = sellImb ? FONTB : FONT;
             ctx.fillText(fmtVol(b), xc + wCell / 2 - 4, ym);
-            ctx.textAlign = "left"; ctx.fillStyle = buyImb ? "#5cf0b8" : "#c9ced6"; ctx.font = `${buyImb ? "700 " : ""}${fs}px ui-monospace,Consolas,monospace`;
+            ctx.textAlign = "left"; ctx.fillStyle = buyImb ? "#6bf5c1" : "#eef1f5"; ctx.font = buyImb ? FONTB : FONT;
             ctx.fillText(fmtVol(a), xc + wCell / 2 + 4, ym);
-            ctx.font = `${fs}px ui-monospace,Consolas,monospace`;
+            ctx.font = FONT;
           } else {
-            ctx.textAlign = "center"; ctx.fillStyle = "#d9dde3";
+            ctx.textAlign = "center"; ctx.fillStyle = "#eef1f5";
             ctx.fillText(fmtVol(S.cell === "delta" ? a - b : a + b), xc + wCell / 2, ym);
           }
         }
@@ -1427,7 +1477,7 @@ const R = {
       // candle footer: volume / delta
       if (cw >= 40) {
         const d = c.buy - c.sell;
-        ctx.font = "10px ui-monospace,Consolas,monospace"; ctx.textAlign = "center";
+        ctx.font = `600 ${Math.round(10.5 * S.textScale)}px ui-monospace,Consolas,monospace`; ctx.textAlign = "center";
         ctx.fillStyle = d >= 0 ? "#22c38e" : "#ff5a5f";
         const yF = Math.min(g.y1 - 8, yL + 11);
         ctx.fillText("Δ " + fmtVol(d), (xL + xR) / 2, yF);
@@ -1468,11 +1518,17 @@ const R = {
   },
 
   profile(ctx, g, cs) {
-    const row = Candles.row; const prof = new Map(); let maxV = 0, tot = 0;
-    for (const c of cs) for (const [r, [b, a]] of c.rows) { let e = prof.get(r); if (!e) { e = [0, 0]; prof.set(r, e); } e[0] += b; e[1] += a; }
+    const row = Candles.row; let prof, maxV = 0, tot = 0;
+    const pk = cs.length ? [cs[0].t, cs[cs.length - 1].t, row, cs.length].join("|") : "";
+    if (this._profKey === pk && Date.now() - this._profT < 250) prof = this._profMap;
+    else {
+      prof = new Map();
+      for (const c of cs) for (const [r, [b, a]] of c.rows) { let e = prof.get(r); if (!e) { e = [0, 0]; prof.set(r, e); } e[0] += b; e[1] += a; }
+      this._profKey = pk; this._profT = Date.now(); this._profMap = prof;
+    }
     for (const [, [b, a]] of prof) { if (a + b > maxV) maxV = a + b; tot += a + b; }
     if (!maxV) return;
-    const w = Math.min(140, (g.x1 - g.x0) * 0.16);
+    const w = Math.min(isNarrow() ? 60 : 140, (g.x1 - g.x0) * 0.16);
     const xL = g.x0;
     let poc = null, pv = 0; for (const [r, [b, a]] of prof) if (a + b > pv) { pv = a + b; poc = r; }
     // value area 70%
@@ -1590,7 +1646,9 @@ const R = {
   },
 
   ladder() {
-    const c = this.lc, ctx = c.getContext("2d");
+    if (Date.now() - (this._ladT || 0) < 250 && !this._ladForce) return;
+    this._ladT = Date.now(); this._ladForce = false;
+    const c = this.lc; if (!c.offsetWidth) return; const ctx = c.getContext("2d");
     const W = c.width / this.dpr, H = c.height / this.dpr;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.fillStyle = "#0e1013"; ctx.fillRect(0, 0, W, H);
@@ -1649,7 +1707,7 @@ const UI = {
     bindSeg("gMode", v => S.mode === v, v => S.mode = v);
     bindSeg("gTf", v => +v === S.tf, v => {
       S.tf = +v; Candles.autoRow = 0; Candles.invalidate();
-      const vw = R.view; vw.msPerPx = clamp(S.tf / clamp(R.W / 7, 45, 120), 20, 60000);
+      const vw = R.view; vw.msPerPx = clamp(S.tf / candlePx(), 20, 60000);
       vw.follow = true; vw.autoY = true; vw.mid = NaN; vw.pxPerUsd = NaN; R._heatKey = null;
     });
     bindSeg("gCell", v => S.cell === v, v => S.cell = v);
@@ -1658,6 +1716,8 @@ const UI = {
     $("selRow").onchange = e => { S.row = e.target.value; saveSettings(); Candles.invalidate(); };
     $("btnFollow").onclick = () => { R.view.follow = true; R.view.autoY = true; R.dirty = true; };
     $("btnSettings").onclick = () => this.settings();
+    $("btnAlign").onclick = () => this.alignDialog();
+    $("btnText").onclick = () => { const z = [1, 1.15, 1.35, 1.6]; S.textScale = z[(z.indexOf(S.textScale) + 1) % z.length] || 1.15; saveSettings(); this.msg("Number size " + Math.round(S.textScale * 100) + "%", 2000); R.dirty = true; };
     $("btnHelp").onclick = () => this.help();
     $("btnAddLv").onclick = () => this.levelsDialog();
     $("btnSound").onclick = () => { S.sound = !S.sound; saveSettings(); this.syncSound(); if (S.sound) this.beep(1); };
@@ -1748,6 +1808,7 @@ const UI = {
       if (this._msgT && now > this._msgT) { $("fMsg").textContent = ""; this._msgT = 0; }
     }
     this.renderVenues();
+    if (!this._bkT || now - this._bkT > 500) { this._bkT = now; this.renderBook(); }
     $("zAuto").classList.toggle("on", !!R.view.autoY);
     if (this.sigDirty) this.renderSignals();
     if (!this._lvT || now - this._lvT > 1000 || this.lvDirty) { this._lvT = now; this.lvDirty = false; this.renderLevels(); Levels.checkAlerts(); }
@@ -1798,6 +1859,39 @@ const UI = {
       Levels.grade(); this.lvDirty = true; R.dirty = true; $("modal").classList.remove("on");
     };
     $("modal").classList.add("on");
+  },
+  renderBook() {
+    const b = Hub.book; $("bkBand").textContent = "±$" + S.bookBand + " resting orders";
+    if (!isFinite(b.ema)) return;
+    const p = b.ema * 100, nm = $("bkName");
+    nm.textContent = p >= 60 ? "BIDS STRONGER" : p <= 40 ? "ASKS STRONGER" : "BOOK BALANCED";
+    nm.style.color = p >= 60 ? "var(--buy)" : p <= 40 ? "var(--sell)" : "var(--dim)";
+    $("bkBid").style.width = p.toFixed(1) + "%";
+    $("bkBidT").textContent = "bids " + p.toFixed(0) + "%";
+    $("bkAskT").textContent = (100 - p).toFixed(0) + "% asks";
+    const old = b.hist.find(h => h[0] >= Date.now() - 20e3);
+    const dlt = old ? (b.ema - old[1]) * 100 : 0;
+    $("bkTrend").textContent = Math.abs(dlt) < 3 ? "steady" : dlt > 0 ? "bids building ▲" : "asks building ▼";
+    const o = S.displayOffset, w = [];
+    if (b.wallAsk) w.push(`<span style="color:var(--sell)">Biggest ask wall</span> ${(b.wallAsk.p + o).toFixed(2)} · ${fmtVol(b.wallAsk.s)} (${(b.wallAsk.p - b.mid).toFixed(2)} away)`);
+    if (b.wallBid) w.push(`<span style="color:var(--buy)">Biggest bid wall</span> ${(b.wallBid.p + o).toFixed(2)} · ${fmtVol(b.wallBid.s)} (${(b.mid - b.wallBid.p).toFixed(2)} away)`);
+    $("bkWalls").innerHTML = w.join("<br>");
+  },
+  alignDialog() {
+    const cur = isFinite(Hub.lastPx) ? (Hub.lastPx + S.displayOffset).toFixed(2) : "—";
+    $("card").innerHTML = `<h2>ALIGN WITH YOUR CHART</h2>
+      <p>This chart uses exchange gold prices, which can sit a few dollars away from OANDA / TradingView. Type the price your TradingView chart shows right now and everything here (axis, footprint, your levels) shifts to match.</p>
+      <p style="font:12px var(--mono);color:var(--dim)">Price here now: <b style="color:var(--text)">${cur}</b> · current offset ${(S.displayOffset >= 0 ? "+" : "") + S.displayOffset.toFixed(2)}</p>
+      <div class="form" style="grid-template-columns:1fr"><label>TradingView price right now<input id="alPx" type="number" step="0.01" inputmode="decimal" placeholder="e.g. 4142.35"></label></div>
+      <div class="row"><button class="btn ghost" id="alReset">Reset to 0</button><button class="btn ghost" id="alCancel">Cancel</button><button class="btn" id="alSave">Align</button></div>`;
+    $("alCancel").onclick = () => $("modal").classList.remove("on");
+    $("alReset").onclick = () => { S.displayOffset = 0; saveSettings(); R.dirty = true; R._ladForce = true; $("modal").classList.remove("on"); };
+    $("alSave").onclick = () => {
+      const v = parseFloat($("alPx").value);
+      if (isFinite(v) && isFinite(Hub.lastPx)) { S.displayOffset = Math.round((v - Hub.lastPx) * 100) / 100; saveSettings(); this.msg("Aligned: offset " + (S.displayOffset >= 0 ? "+" : "") + S.displayOffset.toFixed(2), 4000); R.view.mid = NaN; R.dirty = true; R._ladForce = true; }
+      $("modal").classList.remove("on");
+    };
+    $("modal").classList.add("on"); setTimeout(() => $("alPx").focus(), 50);
   },
   renderSignals() {
     this.sigDirty = false;
@@ -1862,7 +1956,7 @@ const UI = {
     cv.addEventListener("dblclick", e => {
       const z = zone(pos(e));
       if (z === "price") R.view.autoY = true;                                   // double-click price scale = auto-fit price
-      else if (z === "time") R.view.msPerPx = clamp(S.tf / clamp(R.W / 7, 45, 120), 20, 60000); // = reset candle width
+      else if (z === "time") R.view.msPerPx = clamp(S.tf / candlePx(), 20, 60000); // = reset candle width
       else { R.view.follow = true; R.view.autoY = true; }
       R.dirty = true;
     });
@@ -1973,6 +2067,8 @@ const UI = {
         <label>Absorption: extreme volume × median row<input id="s_abs" type="number" min="1" max="20" step="0.5" value="${v("absorbX")}"></label>
         <label>Exhaustion: extreme row ≤ % of POC<input id="s_exh" type="number" min="0" max="30" value="${v("exhaustPct")}"></label>
         <label>Local extreme lookback (candles)<input id="s_div" type="number" min="2" max="50" value="${v("divLook")}"></label>
+        <label>Book control range (± $ from price)<input id="s_bkb" type="number" min="0.5" max="20" step="0.5" value="${v("bookBand")}"></label>
+        <label>Footprint number size (%)<input id="s_txt" type="number" min="80" max="200" step="5" value="${Math.round(S.textScale * 100)}"></label>
       </div>
       <h4>Stored data</h4>
       <p>Trades are saved in this browser (IndexedDB) so your footprint history survives a refresh. <button class="btn ghost" id="s_clear">Clear stored trades</button> <button class="btn ghost" id="s_csv">Export visible footprint CSV</button> <button class="btn ghost" id="s_notif">Enable desktop alerts</button></p>
@@ -1989,7 +2085,8 @@ const UI = {
       const num = (id, k) => { const x = parseFloat($(id).value); if (isFinite(x)) S[k] = x; };
       num("s_bf", "backfillHours"); num("s_keep", "keepHours"); num("s_off", "displayOffset"); num("s_snap", "snapMs");
       num("s_con", "heatContrast"); num("s_bmin", "bubbleMin"); num("s_bsc", "bubbleScale");
-      num("s_imb", "imbRatio"); num("s_imbm", "imbMin"); num("s_stk", "stackN"); num("s_abs", "absorbX"); num("s_exh", "exhaustPct"); num("s_div", "divLook");
+      num("s_imb", "imbRatio"); num("s_imbm", "imbMin"); num("s_stk", "stackN"); num("s_abs", "absorbX"); num("s_exh", "exhaustPct"); num("s_div", "divLook"); num("s_bkb", "bookBand");
+      { const t = parseFloat($("s_txt").value); if (isFinite(t)) S.textScale = clamp(t / 100, 0.8, 2); }
       S.heatLog = $("s_log").value === "1";
       saveSettings();
       if (old !== JSON.stringify(S.sym)) { for (const k of PRIORITY) if (S.venues[k]) { FEEDS[k].stop(); FEEDS[k].start(); } this.buildVenues(); }
@@ -2034,12 +2131,23 @@ let snapTimer = null;
 function restartSnap() { if (snapTimer) clearInterval(snapTimer); snapTimer = setInterval(() => Hub.snapshot(), clamp(S.snapMs, 100, 5000)); }
 async function boot() {
   UI.init(); R.layout();
-  R.view.msPerPx = clamp(S.tf / clamp(R.W / 7, 45, 120), 20, 60000);
+  R.view.msPerPx = clamp(S.tf / candlePx(), 20, 60000);
   await Persist.init();
   for (const k of PRIORITY) if (S.venues[k]) FEEDS[k].start();
   restartSnap();
   let lastF = 0;
-  const loop = (ts) => { if (ts - lastF >= 40) { lastF = ts; try { R.frame(); } catch (e) { console.error(e); } } requestAnimationFrame(loop); };
+  let budget = 16;
+  const loop = (ts) => {
+    if (ts - lastF >= budget - 1) {
+      lastF = ts;
+      if (R.view.follow && store.n) R.dirty = true;
+      const t0 = performance.now();
+      try { R.frame(); } catch (e) { console.error(e); }
+      const dt = performance.now() - t0;
+      budget = dt > 14 ? 33 : dt < 8 ? 16 : budget; // drop to 30 fps if a frame is heavy
+    }
+    requestAnimationFrame(loop);
+  };
   requestAnimationFrame(loop);
   setInterval(() => { R.dirty = true; UI.venuesDirty = true; }, 1000);
   window.addEventListener("beforeunload", () => Persist.flush());
